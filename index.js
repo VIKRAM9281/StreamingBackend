@@ -17,6 +17,10 @@ const MAX_VIEWERS = 10;
 
 const rooms = {};
 const socketToRoom = {};
+app.get("/", (req, res) => {
+  res.send('Stream server is running successfully');
+});
+app.use(cors());
 
 io.on('connection', (socket) => {
   console.log(`🔌 New client connected: ${socket.id}`);
