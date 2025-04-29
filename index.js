@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 
 const app = express();
+app.set('trust proxy', true);
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
@@ -21,7 +22,6 @@ app.get("/", (req, res) => {
   res.send('Stream server is running successfully');
 });
 app.use(cors());
-
 io.on('connection', (socket) => {
   console.log(`🔌 New client connected: ${socket.id}`);
 
