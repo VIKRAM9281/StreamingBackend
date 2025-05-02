@@ -51,23 +51,19 @@ io.on('connection', (socket) => {
 
   socket.on('join-room', (roomId) => {
     if (!rooms[roomId]) {
-      console.log(`❌ Room ${roomId} does not exist`);
       socket.emit('invalid-room');
       return;
     }
-
+  
     if (rooms[roomId].viewers.size >= MAX_VIEWERS) {
-      console.log(`❌ Room ${roomId} is full`);
       socket.emit('room-full');
       return;
     }
-
+  
     rooms[roomId].viewers.add(socket.id);
     socketToRoom[socket.id] = roomId;
     socket.join(roomId);
-
-    console.log(`👋 Viewer ${socket.id} joined room ${roomId}`);
-
+  
     socket.emit('room-joined', {
       roomId,
       hostId: rooms[roomId].hostId,
@@ -75,19 +71,20 @@ io.on('connection', (socket) => {
       viewerCount: rooms[roomId].viewers.size,
       messages: rooms[roomId].messages,
     });
-
-    if (rooms[roomId].isHostReady) {
+  
+    // 🔄 Delay notifying host by 1 second
+    setTimeout(() => {
       io.to(rooms[roomId].hostId).emit('user-joined', socket.id);
-    }
-
+    }, 1000);
+  
     if (rooms[roomId].isStreaming) {
-      console.log(`📺 Viewer ${socket.id} joined while host is streaming`);
       socket.emit('host-started-streaming');
       socket.emit('viewer-joined', rooms[roomId].hostId);
     }
-
+  
     emitRoomInfo(roomId);
   });
+  
 
   socket.on('host-streaming', (roomId) => {
     if (rooms[roomId] && rooms[roomId].hostId === socket.id) {
