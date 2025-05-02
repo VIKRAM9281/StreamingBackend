@@ -1,4 +1,3 @@
-
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -15,13 +14,15 @@ const io = new Server(server, {
 });
 
 const MAX_VIEWERS = 10;
-
 const rooms = {};
 const socketToRoom = {};
+
+app.use(cors());
+
 app.get("/", (req, res) => {
   res.send('Stream server is running successfully');
 });
-app.use(cors());
+
 io.on('connection', (socket) => {
   console.log(`🔌 New client connected: ${socket.id}`);
 
@@ -36,6 +37,7 @@ io.on('connection', (socket) => {
       hostId: socket.id,
       viewers: new Set(),
       isStreaming: false,
+      isHostReady: false,
       messages: [],
     };
 
@@ -74,7 +76,9 @@ io.on('connection', (socket) => {
       messages: rooms[roomId].messages,
     });
 
-    io.to(rooms[roomId].hostId).emit('user-joined', socket.id);
+    if (rooms[roomId].isHostReady) {
+      io.to(rooms[roomId].hostId).emit('user-joined', socket.id);
+    }
 
     if (rooms[roomId].isStreaming) {
       console.log(`📺 Viewer ${socket.id} joined while host is streaming`);
@@ -88,6 +92,7 @@ io.on('connection', (socket) => {
   socket.on('host-streaming', (roomId) => {
     if (rooms[roomId] && rooms[roomId].hostId === socket.id) {
       rooms[roomId].isStreaming = true;
+      rooms[roomId].isHostReady = true;
       rooms[roomId].viewers.forEach((viewerId) => {
         console.log(`📢 Notifying viewer ${viewerId} that host is streaming`);
         io.to(viewerId).emit('host-started-streaming');
@@ -107,7 +112,7 @@ io.on('connection', (socket) => {
     console.log(`📡 Sending answer from ${socket.id} to ${target}`);
     io.to(target).emit('answer', { sdp, sender: socket.id });
   });
-  
+
   socket.on('ice-candidate', ({ target, candidate }) => {
     console.log(`📡 Sending ICE candidate from ${socket.id} to ${target}`);
     io.to(target).emit('ice-candidate', { candidate, sender: socket.id });
