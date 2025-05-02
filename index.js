@@ -178,7 +178,7 @@ io.on('connection', (socket) => {
   }
 });
 
-app.get('/health', (req, res) => {
+app.get('/Roomcount', (req, res) => {
   res.status(200).json({
     status: 'ok',
     activeRooms: Object.keys(rooms).length,
