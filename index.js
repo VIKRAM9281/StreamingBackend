@@ -186,6 +186,20 @@ app.get('/Roomcount', (req, res) => {
     activeRooms: Object.keys(rooms).length,
   });
 });
+app.get('/rooms', (req, res) => {
+  const roomList = Object.keys(rooms).map(roomId => ({
+    roomId,
+    viewerCount: rooms[roomId].viewers.size,
+    isStreaming: rooms[roomId].isStreaming,
+    hostId: rooms[roomId].hostId,
+  }));
+
+  res.status(200).json({
+    status: 'ok',
+    rooms: roomList,
+  });
+});
+
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
