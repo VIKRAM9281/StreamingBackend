@@ -19,7 +19,7 @@ const socketToRoom = {};
 
 app.use(cors());
 
-app.get("/", (req, res) => {
+app.get('/', (req, res) => {
   res.send('Stream server is running successfully');
 });
 
@@ -27,6 +27,12 @@ io.on('connection', (socket) => {
   console.log(`🔌 New client connected: ${socket.id}`);
 
   socket.on('create-room', (roomId) => {
+    if (!roomId || typeof roomId !== 'string') {
+      console.log('Invalid room ID');
+      socket.emit('invalid-room');
+      return;
+    }
+
     if (rooms[roomId]) {
       console.log(`❌ Room ${roomId} already exists`);
       socket.emit('room-exists');
@@ -50,20 +56,25 @@ io.on('connection', (socket) => {
   });
 
   socket.on('join-room', (roomId) => {
+    if (!roomId || typeof roomId !== 'string') {
+      socket.emit('invalid-room');
+      return;
+    }
+
     if (!rooms[roomId]) {
       socket.emit('invalid-room');
       return;
     }
-  
+
     if (rooms[roomId].viewers.size >= MAX_VIEWERS) {
       socket.emit('room-full');
       return;
     }
-  
+
     rooms[roomId].viewers.add(socket.id);
     socketToRoom[socket.id] = roomId;
     socket.join(roomId);
-  
+
     socket.emit('room-joined', {
       roomId,
       hostId: rooms[roomId].hostId,
@@ -71,51 +82,66 @@ io.on('connection', (socket) => {
       viewerCount: rooms[roomId].viewers.size,
       messages: rooms[roomId].messages,
     });
-  
-    // 🔄 Delay notifying host by 1 second
-    setTimeout(() => {
+
+    if (rooms[roomId].isHostReady) {
       io.to(rooms[roomId].hostId).emit('user-joined', socket.id);
-    }, 1000);
-  
+    }
+
     if (rooms[roomId].isStreaming) {
       socket.emit('host-started-streaming');
       socket.emit('viewer-joined', rooms[roomId].hostId);
     }
-  
+
     emitRoomInfo(roomId);
   });
-  
 
   socket.on('host-streaming', (roomId) => {
-    if (rooms[roomId] && rooms[roomId].hostId === socket.id) {
-      rooms[roomId].isStreaming = true;
-      rooms[roomId].isHostReady = true;
-      rooms[roomId].viewers.forEach((viewerId) => {
-        console.log(`📢 Notifying viewer ${viewerId} that host is streaming`);
-        io.to(viewerId).emit('host-started-streaming');
-        io.to(viewerId).emit('viewer-joined', socket.id);
-      });
-      console.log(`🎥 Host ${socket.id} started streaming in room ${roomId}`);
-      emitRoomInfo(roomId);
+    if (!rooms[roomId] || rooms[roomId].hostId !== socket.id) {
+      return;
     }
+
+    rooms[roomId].isStreaming = true;
+    rooms[roomId].isHostReady = true;
+    rooms[roomId].viewers.forEach((viewerId) => {
+      console.log(`📢 Notifying viewer ${viewerId} that host is streaming`);
+      io.to(viewerId).emit('host-started-streaming');
+      io.to(viewerId).emit('viewer-joined', socket.id);
+    });
+    console.log(`🎥 Host ${socket.id} started streaming in room ${roomId}`);
+    emitRoomInfo(roomId);
   });
 
   socket.on('offer', ({ target, sdp }) => {
+    if (!target || !sdp) {
+      console.error('Invalid offer data');
+      return;
+    }
     console.log(`📡 Sending offer from ${socket.id} to ${target}`);
     io.to(target).emit('offer', { sdp, sender: socket.id });
   });
 
   socket.on('answer', ({ target, sdp }) => {
+    if (!target || !sdp) {
+      console.error('Invalid answer data');
+      return;
+    }
     console.log(`📡 Sending answer from ${socket.id} to ${target}`);
     io.to(target).emit('answer', { sdp, sender: socket.id });
   });
 
   socket.on('ice-candidate', ({ target, candidate }) => {
+    if (!target || !candidate) {
+      console.error('Invalid ICE candidate data');
+      return;
+    }
     console.log(`📡 Sending ICE candidate from ${socket.id} to ${target}`);
     io.to(target).emit('ice-candidate', { candidate, sender: socket.id });
   });
 
   socket.on('send-message', (message) => {
+    if (!message || typeof message !== 'string') {
+      return;
+    }
     console.log(`💬 Message from ${socket.id}: ${message}`);
     const roomId = socketToRoom[socket.id];
     if (roomId && rooms[roomId]) {
@@ -152,6 +178,7 @@ io.on('connection', (socket) => {
       rooms[roomId].viewers.forEach((viewerId) => {
         io.to(viewerId).emit('room-closed');
         delete socketToRoom[viewerId];
+        io.sockets.sockets.get(viewerId)?.leave(roomId);
       });
       delete rooms[roomId];
     } else {
@@ -186,8 +213,9 @@ app.get('/Roomcount', (req, res) => {
     activeRooms: Object.keys(rooms).length,
   });
 });
+
 app.get('/rooms', (req, res) => {
-  const roomList = Object.keys(rooms).map(roomId => ({
+  const roomList = Object.keys(rooms).map((roomId) => ({
     roomId,
     viewerCount: rooms[roomId].viewers.size,
     isStreaming: rooms[roomId].isStreaming,
@@ -199,7 +227,6 @@ app.get('/rooms', (req, res) => {
     rooms: roomList,
   });
 });
-
 
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
