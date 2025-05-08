@@ -42,6 +42,7 @@ io.on('connection', (socket) => {
     rooms[roomId] = {
       hostId: socket.id,
       viewers: new Set(),
+      approvedStreamers: new Set(),
       isStreaming: false,
       isHostReady: false,
       messages: [],
@@ -95,6 +96,11 @@ io.on('connection', (socket) => {
       socket.emit('viewer-joined', rooms[roomId].hostId);
     }
 
+    // Notify about existing approved streamers
+    rooms[roomId].approvedStreamers.forEach((streamerId) => {
+      socket.emit('user-started-streaming', { streamerId });
+    });
+
     console.log(`👤 Viewer ${socket.id} joined room ${roomId}`);
     emitRoomInfo(roomId);
   });
@@ -130,6 +136,7 @@ io.on('connection', (socket) => {
 
   socket.on('stream-request', ({ roomId, viewerId }) => {
     if (!rooms[roomId] || !rooms[roomId].viewers.has(viewerId)) {
+      console.log(`❌ Invalid stream request from ${viewerId} in room ${roomId}`);
       return;
     }
 
@@ -140,15 +147,26 @@ io.on('connection', (socket) => {
   socket.on('stream-permission', ({ viewerId, allowed }) => {
     const roomId = socketToRoom[socket.id];
     if (!roomId || !rooms[roomId] || rooms[roomId].hostId !== socket.id) {
+      console.log(`❌ Invalid permission from ${socket.id} for ${viewerId}`);
       return;
     }
 
     console.log(`📜 Stream permission for ${viewerId}: ${allowed ? 'allowed' : 'denied'}`);
     io.to(viewerId).emit('stream-permission', { allowed });
     if (allowed) {
-      rooms[roomId].hostId = viewerId; // Optionally reassign host for streaming
-      io.to(roomId).emit('host-started-streaming');
+      rooms[roomId].approvedStreamers.add(viewerId);
+      io.to(roomId).emit('user-started-streaming', { streamerId: viewerId });
     }
+  });
+
+  socket.on('user-started-streaming', ({ roomId, streamerId }) => {
+    if (!rooms[roomId] || !rooms[roomId].approvedStreamers.has(streamerId)) {
+      console.log(`❌ Unauthorized streaming attempt by ${streamerId} in room ${roomId}`);
+      return;
+    }
+
+    console.log(`🎥 Viewer ${streamerId} started streaming in room ${roomId}`);
+    io.to(roomId).emit('user-started-streaming', { streamerId });
   });
 
   socket.on('chat-message', ({ roomId, message }) => {
@@ -230,9 +248,10 @@ io.on('connection', (socket) => {
       delete rooms[roomId];
     } else {
       rooms[roomId].viewers.delete(socket.id);
+      rooms[roomId].approvedStreamers.delete(socket.id);
       rooms[roomId].viewerList = Array.from(rooms[roomId].viewers);
       console.log(`🚪 Viewer ${socket.id} left room ${roomId}`);
-      io.to(rooms[roomId].hostId).emit('user-left', socket.id);
+      io.to(roomId).emit('user-left', socket.id);
       io.to(roomId).emit('room-info', {
         viewerCount: rooms[roomId].viewers.size,
         viewerList: rooms[roomId].viewerList,
@@ -241,7 +260,6 @@ io.on('connection', (socket) => {
 
     delete socketToRoom[socket.id];
     socket.leave(roomId);
-    emitRoomInfo(roomId);
   }
 
   function emitRoomInfo(roomId) {
