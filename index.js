@@ -44,6 +44,7 @@ io.on('connection', (socket) => {
       viewers: new Set(),
       approvedStreamers: new Set(),
       isStreaming: false,
+      isHostReady: false,
       messages: [],
       viewerList: [],
     };
@@ -86,12 +87,13 @@ io.on('connection', (socket) => {
       messages: rooms[roomId].messages,
     });
 
-    if (io.sockets.sockets.has(rooms[roomId].hostId)) {
+    if (rooms[roomId].isHostReady) {
       io.to(rooms[roomId].hostId).emit('user-joined', socket.id);
     }
 
     if (rooms[roomId].isStreaming) {
       socket.emit('host-started-streaming');
+      socket.emit('viewer-joined', rooms[roomId].hostId);
     }
 
     rooms[roomId].approvedStreamers.forEach((streamerId) => {
@@ -104,16 +106,15 @@ io.on('connection', (socket) => {
 
   socket.on('host-streaming', (roomId) => {
     if (!rooms[roomId] || rooms[roomId].hostId !== socket.id) {
-      console.log(`❌ Invalid host-streaming request from ${socket.id} for room ${roomId}`);
       return;
     }
 
     rooms[roomId].isStreaming = true;
+    rooms[roomId].isHostReady = true;
     rooms[roomId].viewers.forEach((viewerId) => {
-      if (io.sockets.sockets.has(viewerId)) {
-        console.log(`📢 Notifying viewer ${viewerId} that host is streaming`);
-        io.to(viewerId).emit('host-started-streaming');
-      }
+      console.log(`📢 Notifying viewer ${viewerId} that host is streaming`);
+      io.to(viewerId).emit('host-started-streaming');
+      io.to(viewerId).emit('viewer-joined', socket.id);
     });
     console.log(`🎥 Host ${socket.id} started streaming in room ${roomId}`);
     emitRoomInfo(roomId);
@@ -121,15 +122,12 @@ io.on('connection', (socket) => {
 
   socket.on('stop-streaming', (roomId) => {
     if (!rooms[roomId] || rooms[roomId].hostId !== socket.id) {
-      console.log(`❌ Invalid stop-streaming request from ${socket.id} for room ${roomId}`);
       return;
     }
 
     rooms[roomId].isStreaming = false;
     rooms[roomId].viewers.forEach((viewerId) => {
-      if (io.sockets.sockets.has(viewerId)) {
-        io.to(viewerId).emit('host-stopped-streaming');
-      }
+      io.to(viewerId).emit('host-stopped-streaming');
     });
     console.log(`🛑 Host ${socket.id} stopped streaming in room ${roomId}`);
     emitRoomInfo(roomId);
@@ -142,9 +140,7 @@ io.on('connection', (socket) => {
     }
 
     console.log(`📩 Stream request from viewer ${viewerId} in room ${roomId}`);
-    if (io.sockets.sockets.has(rooms[roomId].hostId)) {
-      io.to(rooms[roomId].hostId).emit('stream-request', { viewerId });
-    }
+    io.to(rooms[roomId].hostId).emit('stream-request', { viewerId });
   });
 
   socket.on('stream-permission', ({ viewerId, allowed }) => {
@@ -155,9 +151,7 @@ io.on('connection', (socket) => {
     }
 
     console.log(`📜 Stream permission for ${viewerId}: ${allowed ? 'allowed' : 'denied'}`);
-    if (io.sockets.sockets.has(viewerId)) {
-      io.to(viewerId).emit('stream-permission', { allowed });
-    }
+    io.to(viewerId).emit('stream-permission', { allowed });
     if (allowed) {
       rooms[roomId].approvedStreamers.add(viewerId);
       io.to(roomId).emit('user-started-streaming', { streamerId: viewerId });
@@ -171,11 +165,11 @@ io.on('connection', (socket) => {
     }
 
     console.log(`🎥 Viewer ${streamerId} started streaming in room ${roomId}`);
+    // Removed redundant emission since stream-permission already notifies the room
   });
 
   socket.on('chat-message', ({ roomId, message }) => {
     if (!rooms[roomId] || !message || typeof message !== 'string') {
-      console.log(`❌ Invalid chat message from ${socket.id} in room ${roomId}`);
       return;
     }
 
@@ -187,7 +181,6 @@ io.on('connection', (socket) => {
 
   socket.on('reaction', ({ roomId, type }) => {
     if (!rooms[roomId] || !type || typeof type !== 'string') {
-      console.log(`❌ Invalid reaction from ${socket.id} in room ${roomId}`);
       return;
     }
 
@@ -201,9 +194,7 @@ io.on('connection', (socket) => {
       return;
     }
     console.log(`📡 Sending offer from ${socket.id} to ${target}`);
-    if (io.sockets.sockets.has(target)) {
-      io.to(target).emit('offer', { sdp, sender: socket.id });
-    }
+    io.to(target).emit('offer', { sdp, sender: socket.id });
   });
 
   socket.on('answer', ({ target, sdp }) => {
@@ -212,9 +203,7 @@ io.on('connection', (socket) => {
       return;
     }
     console.log(`📡 Sending answer from ${socket.id} to ${target}`);
-    if (io.sockets.sockets.has(target)) {
-      io.to(target).emit('answer', { sdp, sender: socket.id });
-    }
+    io.to(target).emit('answer', { sdp, sender: socket.id });
   });
 
   socket.on('ice-candidate', ({ target, candidate }) => {
@@ -222,25 +211,8 @@ io.on('connection', (socket) => {
       console.error('Invalid ICE candidate data');
       return;
     }
-    const roomId = socketToRoom[socket.id];
-    if (!rooms[roomId]) return;
-
-    if (target === 'all') {
-      console.log(`📡 Broadcasting ICE candidate from ${socket.id} to all in room ${roomId}`);
-      rooms[roomId].viewers.forEach((viewerId) => {
-        if (viewerId !== socket.id && io.sockets.sockets.has(viewerId)) {
-          io.to(viewerId).emit('ice-candidate', { candidate, sender: socket.id });
-        }
-      });
-      if (rooms[roomId].hostId !== socket.id && io.sockets.sockets.has(rooms[roomId].hostId)) {
-        io.to(rooms[roomId].hostId).emit('ice-candidate', { candidate, sender: socket.id });
-      }
-    } else {
-      console.log(`📡 Sending ICE candidate from ${socket.id} to ${target}`);
-      if (io.sockets.sockets.has(target)) {
-        io.to(target).emit('ice-candidate', { candidate, sender: socket.id });
-      }
-    }
+    console.log(`📡 Sending ICE candidate from ${socket.id} to ${target}`);
+    io.to(target).emit('ice-candidate', { candidate, sender: socket.id });
   });
 
   socket.on('leave-room', () => {
@@ -268,11 +240,9 @@ io.on('connection', (socket) => {
       console.log(`🛑 Host ${socket.id} left, closing room ${roomId}`);
       io.to(roomId).emit('host-left');
       rooms[roomId].viewers.forEach((viewerId) => {
-        if (io.sockets.sockets.has(viewerId)) {
-          io.to(viewerId).emit('room-closed');
-          delete socketToRoom[viewerId];
-          io.sockets.sockets.get(viewerId)?.leave(roomId);
-        }
+        io.to(viewerId).emit('room-closed');
+        delete socketToRoom[viewerId];
+        io.sockets.sockets.get(viewerId)?.leave(roomId);
       });
       delete rooms[roomId];
     } else {
@@ -281,7 +251,10 @@ io.on('connection', (socket) => {
       rooms[roomId].viewerList = Array.from(rooms[roomId].viewers);
       console.log(`🚪 Viewer ${socket.id} left room ${roomId}`);
       io.to(roomId).emit('user-left', socket.id);
-      emitRoomInfo(roomId);
+      io.to(roomId).emit('room-info', {
+        viewerCount: rooms[roomId].viewers.size,
+        viewerList: rooms[roomId].viewerList,
+      });
     }
 
     delete socketToRoom[socket.id];
@@ -292,8 +265,11 @@ io.on('connection', (socket) => {
     if (!rooms[roomId]) return;
 
     const info = {
+      hostId: rooms[roomId].hostId,
       viewerCount: rooms[roomId].viewers.size,
       viewerList: rooms[roomId].viewerList,
+      isHostActive: io.sockets.sockets.has(rooms[roomId].hostId),
+      isHostStreaming: rooms[roomId].isStreaming,
     };
 
     console.log(`📊 Emitting room info for ${roomId}:`, info);
