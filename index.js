@@ -96,7 +96,6 @@ io.on('connection', (socket) => {
       socket.emit('viewer-joined', rooms[roomId].hostId);
     }
 
-    // Notify about existing approved streamers
     rooms[roomId].approvedStreamers.forEach((streamerId) => {
       socket.emit('user-started-streaming', { streamerId });
     });
@@ -166,7 +165,7 @@ io.on('connection', (socket) => {
     }
 
     console.log(`🎥 Viewer ${streamerId} started streaming in room ${roomId}`);
-    io.to(roomId).emit('user-started-streaming', { streamerId });
+    // Removed redundant emission since stream-permission already notifies the room
   });
 
   socket.on('chat-message', ({ roomId, message }) => {
